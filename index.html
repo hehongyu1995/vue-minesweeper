@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vue扫雷</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue"></script>
+    <style>
+        button.normal {
+            background-color: lightblue;
+        }
+
+        button.sweeped {
+            background-color: lightgray;
+            color: blue;
+            box-shadow: none;
+        }
+
+        button.hasMine {
+            background-color: red;
+        }
+
+        button.mine-1 {
+            color: blue;
+        }
+
+        button.mine-2 {
+            color: darkgreen;
+        }
+
+        button.mine-3 {
+            color: darkred;
+        }
+
+        button.mine-4 {
+            color: brown;
+        }
+
+        button.mine-5 {
+            color: darkmagenta;
+        }
+
+        .game-board {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .row {
+            flex: auto;
+            display: flex;
+        }
+
+        .cell {
+            background-color: cornflowerblue;
+            width: 30px;
+            height: 30px;
+            font-size: 18px;
+            border-radius: 8px;
+            box-shadow: 0px 2px 0px dodgerblue, 0px 2px 5px rgba(0, 0, 0, .1);
+            margin: 1px;
+        }
+    </style>
+</head>
+<body>
+<div id="mine-sweep">
+    <label for="boardSizeSelect">难度选择</label>
+    <select id="boardSizeSelect" v-model="boardSize">
+        <option v-for="difficulty in difficultyList" v-bind:value="difficulty.value">{{difficulty.title}}</option>
+    </select>
+    <p>剩余雷数：{{minesLeft}}</p>
+    <div class="game-board">
+        <div class="row" v-for="(row,rowIndex) in boardData">
+            <button :disabled="gameBoardDisabled||col.disabled" @click="sweepCell(rowIndex,colIndex,true)"
+                    @contextMenu="markCell($event,rowIndex,colIndex)" v-for="(col,colIndex) in row" class="cell"
+                    v-bind:class="[col.style,'mine-'+col.displayValue]">
+                {{col.displayValue}}
+            </button>
+        </div>
+    </div>
+    <div>{{gameMessage}}   时间：{{time}} 秒</div>
+    <button v-if="restartBtnVisible" @click="initGame">重新开始</button>
+</div>
+
+<script>
+    var mineStyle = {
+        "normal": "normal"
+        , "sweeped": "sweeped"
+        , "hasMine": "hasMine"
+    };
+    var gameStatusEnum = {"win": 0, "lose": 1, "inProgress": 2};
+    var countMines = function (board) {
+        var count = 0
+        board.forEach(function (row) {
+            row.forEach(function (cell) {
+                if (cell.hasMine) {
+                    count++
+                }
+            })
+        })
+        console.log("有" + count + "颗雷")
+    };
+    var mineSweep = new Vue({
+        el: "#mine-sweep",
+        data: {
+            isFirstClick: true,
+            boardData: [],
+            row: 8,
+            col: 8,
+            minesCountMax: 10,
+            minesLeft:10,
+            sweepedCellsCount:0,
+            gameStatus: gameStatusEnum.inProgress,
+            alreadySweepedPos: [],
+            gameBoardDisabled: false,
+            time:0,
+            difficultyList: [
+                {title: "8x8 初级", value: "8*8", mines: 10}
+                , {title: "15x15 中级", value: "15*15", mines: 30}
+                , {title: "30x30 高级", value: "30*30", mines: 60}
+            ]
+        },
+        methods: {
+            sweepCell: function (rowIndex, colIndex, isDig) {
+                // console.log("sweep");
+                // console.log("dig cell: (" + rowIndex + "," + colIndex + ")");
+                if (rowIndex < 0
+                    || colIndex < 0
+                    || rowIndex > this.row - 1
+                    || colIndex > this.col - 1
+                    || this.isAlreadyBeenSweeped(rowIndex, colIndex)) {
+                    return;
+                }
+                this.alreadySweepedPos.push([rowIndex, colIndex]);
+                if (this.isFirstClick) {
+                    console.log("First click.Generate game board.");
+                    this.boardData = this.genGameBoard({row: rowIndex, col: colIndex});
+                    countMines(this.boardData);
+                    this.isFirstClick = false;
+                }
+                var cell = this.boardData[rowIndex][colIndex];
+                cell.style = mineStyle.sweeped;
+                cell.disabled = true;
+                this.sweepedCellsCount++;
+                if (cell.hasMine && isDig) {
+                    cell.style = mineStyle.hasMine;
+                    cell.displayValue = "💣";
+                    // 展开所有的雷
+                    this.sweepAllMines([rowIndex, colIndex]);
+                    this.setGameLost();
+                } else {
+                    var minesCount = this.countMinesAround(rowIndex, colIndex);
+                    // 如果周围有雷，就直接标记雷的数量，不遍历剩下的区域
+                    if (minesCount > 0) {
+                        console.log("有雷");
+                        cell.displayValue = minesCount;
+                    } else {
+                        console.log(this.alreadySweepedPos);
+                        // 递归遍历上右下左4个方向
+                        this.sweepCell(rowIndex - 1, colIndex);
+                        this.sweepCell(rowIndex, colIndex + 1);
+                        this.sweepCell(rowIndex + 1, colIndex);
+                        this.sweepCell(rowIndex, colIndex - 1);
+                    }
+                }
+                if(this.sweepedCellsCount===this.row*this.col-this.minesCountMax){
+                    this.sweepAllMines();
+                    this.setGameWin();
+                }
+            },
+            markCell: function (e, rowIndex, colIndex) {
+                e.preventDefault();
+                console.log("right click:" + "(" + rowIndex + "," + colIndex + ")");
+                var cell=this.boardData[rowIndex][colIndex];
+                if(cell.displayValue===""){
+                    cell.displayValue = "🚩";
+                    this.minesLeft--;
+                }else if(cell.displayValue === "🚩"){
+                    cell.displayValue = "";
+                    this.minesLeft++;
+                }
+
+            },
+            setGameLost:function () {
+                this.gameStatus = gameStatusEnum.lose;
+                this.gameBoardDisabled = true;
+            },
+            setGameWin:function () {
+                this.gameStatus = gameStatusEnum.win;
+                this.gameBoardDisabled = true;
+            },
+            countMinesAround: function (rowIndex, colIndex) {
+                // 返回周围的8个方格里雷的数量
+                var minesCount = 0;
+                try {
+                    minesCount += this.boardData[rowIndex - 1][colIndex - 1].hasMine ? 1 : 0;
+                } catch (err) {
+                    // 说明碰到边界了，啥也不用干
+                }
+                try {
+                    minesCount += this.boardData[rowIndex - 1][colIndex].hasMine ? 1 : 0;
+                } catch (err) {
+                }
+                try {
+                    minesCount += this.boardData[rowIndex - 1][colIndex + 1].hasMine ? 1 : 0;
+                } catch (err) {
+                }
+                try {
+                    minesCount += this.boardData[rowIndex][colIndex - 1].hasMine ? 1 : 0;
+                } catch (err) {
+                }
+                try {
+                    minesCount += this.boardData[rowIndex][colIndex + 1].hasMine ? 1 : 0;
+                } catch (err) {
+                }
+                try {
+                    minesCount += this.boardData[rowIndex + 1][colIndex - 1].hasMine ? 1 : 0;
+                } catch (err) {
+                }
+                try {
+                    minesCount += this.boardData[rowIndex + 1][colIndex].hasMine ? 1 : 0;
+                } catch (err) {
+                }
+                try {
+                    minesCount += this.boardData[rowIndex + 1][colIndex + 1].hasMine ? 1 : 0;
+                } catch (err) {
+                }
+                return minesCount;
+            },
+            isAlreadyBeenSweeped: function (rowIndex, colIndex) {
+                for (var index in this.alreadySweepedPos) {
+                    var pos = this.alreadySweepedPos[index];
+                    if (rowIndex === pos[0] && colIndex === pos[1]) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+            // 生成游戏地图
+            genGameBoard: function (excludeCellPos) {
+                var board = [];
+                for (i = 0; i < this.row; i++) {
+                    var rowData = [];
+                    for (j = 0; j < this.col; j++) {
+                        rowData.push({displayValue: '', style: mineStyle.normal, hasMine: false, disabled: false})
+                    }
+                    board.push(rowData);
+                }
+                if (excludeCellPos) {
+                    board = this.putMinesRandom(this.minesCountMax, board, excludeCellPos);
+                }
+                return board;
+            },
+            putMinesRandom: function (minesNum, board, excludeCellPos) {
+                // 需放置的雷数为0说明雷够了，可以结束放置了
+                console.log("put mines:", minesNum);
+                if (minesNum <= 0) {
+                    return board;
+                }
+                var mineCount = 0;
+                var mineProbability = this.minesCountMax / (this.row * this.col);
+                board.forEach(function (row, rowIndex) {
+                    row.forEach(function (cell, colIndex) {
+                        // 没有雷再决定是否放雷
+                        if (!cell.hasMine) {
+                            if (mineCount < minesNum
+                                && Math.random() < mineProbability
+                                && rowIndex !== excludeCellPos.row
+                                && colIndex !== excludeCellPos.col) {
+                                cell.hasMine = true;
+                                mineCount++;
+                                console.log(mineCount)
+                            }
+                        }
+                    })
+                });
+                board = this.putMinesRandom(minesNum - mineCount, board, excludeCellPos)
+                return board;
+
+            },
+            sweepAllCell: function () {
+                // 扫出所有方格
+                var vm = this;
+                this.boardData.forEach(function (row, rowIndex) {
+                    row.forEach(function (cell, colIndex) {
+                        if (cell.hasMine) {
+                            cell.style = mineStyle.hasMine;
+                            cell.displayValue = "💣"
+                        } else {
+                            cell.style = mineStyle.sweeped;
+                            var mineCountAround = vm.countMinesAround(rowIndex, colIndex);
+                            if (mineCountAround > 0) {
+                                cell.displayValue = mineCountAround;
+                            }
+                        }
+
+                    });
+                });
+            },
+            sweepAllMines: function () {
+                var vm = this;
+                this.boardData.forEach(function (row, rowIndex) {
+                    row.forEach(function (cell, colIndex) {
+                        if (cell.hasMine) {
+                            cell.displayValue = "💣"
+                        }
+                    });
+                });
+            },
+            initGame: function () {
+                this.boardData = this.genGameBoard();
+                this.isFirstClick = true;
+                this.alreadySweepedPos = [];
+                this.gameBoardDisabled = false;
+                this.gameStatus = gameStatusEnum.inProgress;
+                this.minesLeft=this.minesCountMax;
+                this.sweepedCellsCount=0;
+                this.time=0;
+            }
+        },
+        computed: {
+            gameMessage: function () {
+                switch (this.gameStatus) {
+                    case gameStatusEnum.inProgress:
+                        return "😐游戏进行中";
+                    case gameStatusEnum.win:
+                        return "😄你赢了";
+                    case gameStatusEnum.lose:
+                        return "😢你输了，游戏结束";
+                    default:
+                        return ""
+                }
+            },
+            boardSize: {
+                get: function () {
+                    return this.row + "*" + this.col
+                },
+                set: function (v) {
+                    var size = v.split('*');
+                    this.row = size[0];
+                    this.col = size[1];
+                    var vm=this;
+                    this.difficultyList.forEach(function (difficulty) {
+                        if(v===difficulty.value){
+                            vm.minesCountMax = difficulty.mines;
+                        }
+                    });
+                    this.initGame();
+                }
+            },
+            restartBtnVisible:function(){
+                return this.gameStatus !== gameStatusEnum.inProgress;
+            }
+        },
+        created: function () {
+            this.initGame();
+        }
+    })
+    setInterval(function () {
+        mineSweep.time+=1;
+    },1000)
+
+</script>
+</body>
+</html>
