@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>Vue扫雷</title>
     <script src="https://cdn.jsdelivr.net/npm/vue"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.0.9/howler.core.min.js"></script>
     <style>
         button.normal {
             background-color: lightblue;
@@ -12,7 +13,7 @@
         button.sweeped {
             background-color: lightgray;
             color: blue;
-            box-shadow: none;
+            box-shadow: none !important;
         }
 
         button.hasMine {
@@ -52,41 +53,118 @@
 
         .cell {
             background-color: cornflowerblue;
+            font-size: 18px;
+            border-radius: 4px;
+            box-shadow: 0px 3px 2px dodgerblue, 0px 2px 5px rgba(0, 0, 0, .1);
+            margin: 2px;
+            transition: all 0.4s;
+            display: inline-block;
+        }
+
+        .cell.tiny {
+            width: 20px;
+            height: 20px;
+            margin: 1px;
+            font-size: 10px;
+            border-radius: 2px;
+            box-shadow: none;
+            border: 1px dodgerblue solid;
+        }
+
+        .cell.sm {
+            width: 25px;
+            height: 25px;
+            margin: 1px;
+            font-size: 15px;
+            border-radius: 2px;
+            box-shadow: 0px 1px 0px dodgerblue, 0px 1px 0px rgba(0, 0, 0, .1);
+        }
+
+        .cell.md {
             width: 30px;
             height: 30px;
-            font-size: 18px;
-            border-radius: 8px;
-            box-shadow: 0px 2px 0px dodgerblue, 0px 2px 5px rgba(0, 0, 0, .1);
-            margin: 1px;
+            margin: 2px;
+            box-shadow: 0px 2px 2px dodgerblue, 0px 2px 5px rgba(0, 0, 0, .1);
         }
+
+        .cell.lg {
+            width: 40px;
+            height: 40px;
+            margin: 3px;
+        }
+
+        .fade-enter-active, .fade-leave-active {
+            transition: opacity .5s;
+        }
+
+        .fade-enter, .fade-leave-to /* .fade-leave-active below version 2.1.8 */
+        {
+            opacity: 0;
+        }
+
+        .game-board-enter-active, .game-board-leave-active {
+            transition: all 0.5s;
+        }
+
+        .game-board-enter, .game-board-leave-to
+            /* .list-leave-active for below version 2.1.8 */
+        {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
     </style>
 </head>
 <body>
 <div id="mine-sweep">
     <label for="boardSizeSelect">难度选择</label>
     <select id="boardSizeSelect" v-model="boardSize">
-        <option v-for="difficulty in difficultyList" v-bind:value="difficulty.value">{{difficulty.title}}</option>
+        <option disabled value="">请选择难度</option>
+        <option v-for="difficulty in difficultyList" v-bind:value="difficulty.row+'*'+difficulty.col">
+            {{difficulty.title}}
+        </option>
     </select>
-    <p>剩余雷数：{{minesLeft}}</p>
-    <div class="game-board">
-        <div class="row" v-for="(row,rowIndex) in boardData">
-            <button :disabled="gameBoardDisabled||col.disabled" @click="sweepCell(rowIndex,colIndex,true)"
-                    @contextMenu="markCell($event,rowIndex,colIndex)" v-for="(col,colIndex) in row" class="cell"
-                    v-bind:class="[col.style,'mine-'+col.displayValue]">
-                {{col.displayValue}}
-            </button>
-        </div>
+    <p>剩余雷数：{{minesLeft}} </p>
+    <p>时间：{{time}} 秒</p>
+    <div>
+        {{gameMessage}}
+        <transition name="fade">
+            <button v-if="restartBtnVisible" @click="initGame" style="display: inline-block">重新开始</button>
+        </transition>
     </div>
-    <div>{{gameMessage}}   时间：{{time}} 秒</div>
-    <button v-if="restartBtnVisible" @click="initGame">重新开始</button>
+    <div class="game-board">
+        <transition-group name="game-board">
+            <div class="row" v-for="(row,rowIndex) in boardData" v-bind:key="rowIndex">
+                <!--<transition-group name="list">-->
+
+                <button :disabled="gameBoardDisabled||col.disabled" @click="sweepCell(rowIndex,colIndex,true)"
+                        @contextMenu.prevent="markCell(rowIndex,colIndex)" v-for="(col,colIndex) in row"
+                        class="cell"
+                        v-bind:class="[col.style,'mine-'+col.displayValue,selectedDifficulty.cellStyle]"
+                        v-bind:key="colIndex+''+rowIndex">
+                    {{col.displayValue}}
+                </button>
+
+                <!--</transition-group>-->
+            </div>
+        </transition-group>
+
+    </div>
+
+
 </div>
 
 <script>
     var mineStyle = {
-        "normal": "normal"
-        , "sweeped": "sweeped"
-        , "hasMine": "hasMine"
+        normal: "normal"
+        , sweeped: "sweeped"
+        , hasMine: "hasMine"
     };
+    var cellSize = {
+        small: "sm",
+        medium: "md",
+        large: "lg"
+    }
     var gameStatusEnum = {"win": 0, "lose": 1, "inProgress": 2};
     var countMines = function (board) {
         var count = 0
@@ -99,34 +177,41 @@
         })
         console.log("有" + count + "颗雷")
     };
+    var sounds = {
+        explode: new Howl({src: ['explode.wav']})
+        ,win:new Howl({src:['win.wav']})
+        ,sweep:new Howl({src:['sweep.wav']})
+        ,mark:new Howl({src:['mark.wav']})
+        ,newGame:new Howl({src:['newGame.wav']})
+    };
     var mineSweep = new Vue({
         el: "#mine-sweep",
         data: {
             isFirstClick: true,
             boardData: [],
-            row: 8,
-            col: 8,
-            minesCountMax: 10,
-            minesLeft:10,
-            sweepedCellsCount:0,
+            minesLeft: 10,
+            sweepedCellsCount: 0,
             gameStatus: gameStatusEnum.inProgress,
             alreadySweepedPos: [],
             gameBoardDisabled: false,
-            time:0,
+            time: 0,
             difficultyList: [
-                {title: "8x8 初级", value: "8*8", mines: 10}
-                , {title: "15x15 中级", value: "15*15", mines: 30}
-                , {title: "30x30 高级", value: "30*30", mines: 60}
-            ]
+                {title: "8x8 初级", row: "8", col: "8", mines: 10, cellStyle: "lg"}
+                , {title: "15x15 中级", row: "15", col: "15", mines: 30, cellStyle: "md"}
+                , {title: "30x30 高级", row: "30", col: "30", mines: 150, cellStyle: "sm"}
+                , {title: "45x45 专家", row: "45", col: "45", mines: 400, cellStyle: "tiny"}
+            ],
+            selectedDifficulty: {title: "8x8 初级", row: "8", col: "8", mines: 10, cellStyle: "lg"}
         },
         methods: {
             sweepCell: function (rowIndex, colIndex, isDig) {
                 // console.log("sweep");
                 // console.log("dig cell: (" + rowIndex + "," + colIndex + ")");
+                sounds.sweep.play();
                 if (rowIndex < 0
                     || colIndex < 0
-                    || rowIndex > this.row - 1
-                    || colIndex > this.col - 1
+                    || rowIndex > this.selectedDifficulty.row - 1
+                    || colIndex > this.selectedDifficulty.col - 1
                     || this.isAlreadyBeenSweeped(rowIndex, colIndex)) {
                     return;
                 }
@@ -142,6 +227,7 @@
                 cell.disabled = true;
                 this.sweepedCellsCount++;
                 if (cell.hasMine && isDig) {
+                    sounds.explode.play();
                     cell.style = mineStyle.hasMine;
                     cell.displayValue = "💣";
                     // 展开所有的雷
@@ -162,29 +248,30 @@
                         this.sweepCell(rowIndex, colIndex - 1);
                     }
                 }
-                if(this.sweepedCellsCount===this.row*this.col-this.minesCountMax){
+                if (this.sweepedCellsCount === this.selectedDifficulty.row * this.selectedDifficulty.col - this.selectedDifficulty.mines) {
                     this.sweepAllMines();
                     this.setGameWin();
                 }
             },
-            markCell: function (e, rowIndex, colIndex) {
-                e.preventDefault();
+            markCell: function (rowIndex, colIndex) {
                 console.log("right click:" + "(" + rowIndex + "," + colIndex + ")");
-                var cell=this.boardData[rowIndex][colIndex];
-                if(cell.displayValue===""){
+                sounds.mark.play();
+                var cell = this.boardData[rowIndex][colIndex];
+                if (cell.displayValue === "") {
                     cell.displayValue = "🚩";
                     this.minesLeft--;
-                }else if(cell.displayValue === "🚩"){
+                } else if (cell.displayValue === "🚩") {
                     cell.displayValue = "";
                     this.minesLeft++;
                 }
 
             },
-            setGameLost:function () {
+            setGameLost: function () {
                 this.gameStatus = gameStatusEnum.lose;
                 this.gameBoardDisabled = true;
             },
-            setGameWin:function () {
+            setGameWin: function () {
+                sounds.win.play();
                 this.gameStatus = gameStatusEnum.win;
                 this.gameBoardDisabled = true;
             },
@@ -238,15 +325,15 @@
             // 生成游戏地图
             genGameBoard: function (excludeCellPos) {
                 var board = [];
-                for (i = 0; i < this.row; i++) {
+                for (i = 0; i < this.selectedDifficulty.row; i++) {
                     var rowData = [];
-                    for (j = 0; j < this.col; j++) {
+                    for (j = 0; j < this.selectedDifficulty.col; j++) {
                         rowData.push({displayValue: '', style: mineStyle.normal, hasMine: false, disabled: false})
                     }
                     board.push(rowData);
                 }
                 if (excludeCellPos) {
-                    board = this.putMinesRandom(this.minesCountMax, board, excludeCellPos);
+                    board = this.putMinesRandom(this.selectedDifficulty.mines, board, excludeCellPos);
                 }
                 return board;
             },
@@ -257,7 +344,7 @@
                     return board;
                 }
                 var mineCount = 0;
-                var mineProbability = this.minesCountMax / (this.row * this.col);
+                var mineProbability = this.selectedDifficulty.mines / (this.selectedDifficulty.row * this.selectedDifficulty.col);
                 board.forEach(function (row, rowIndex) {
                     row.forEach(function (cell, colIndex) {
                         // 没有雷再决定是否放雷
@@ -307,14 +394,16 @@
                 });
             },
             initGame: function () {
+                sounds.newGame.play();
                 this.boardData = this.genGameBoard();
                 this.isFirstClick = true;
                 this.alreadySweepedPos = [];
                 this.gameBoardDisabled = false;
                 this.gameStatus = gameStatusEnum.inProgress;
-                this.minesLeft=this.minesCountMax;
-                this.sweepedCellsCount=0;
-                this.time=0;
+                console.log("---", this.selectedDifficulty)
+                this.minesLeft = this.selectedDifficulty.mines;
+                this.sweepedCellsCount = 0;
+                this.time = 0;
             }
         },
         computed: {
@@ -332,22 +421,20 @@
             },
             boardSize: {
                 get: function () {
-                    return this.row + "*" + this.col
+                    return this.selectedDifficulty.row + "*" + this.selectedDifficulty.col
                 },
                 set: function (v) {
-                    var size = v.split('*');
-                    this.row = size[0];
-                    this.col = size[1];
-                    var vm=this;
+                    var vm = this;
+                    var size = v.split("*");
                     this.difficultyList.forEach(function (difficulty) {
-                        if(v===difficulty.value){
-                            vm.minesCountMax = difficulty.mines;
+                        if (size[0] === difficulty.row && size[1] === difficulty.col) {
+                            vm.selectedDifficulty = difficulty;
                         }
                     });
                     this.initGame();
                 }
             },
-            restartBtnVisible:function(){
+            restartBtnVisible: function () {
                 return this.gameStatus !== gameStatusEnum.inProgress;
             }
         },
@@ -356,8 +443,8 @@
         }
     })
     setInterval(function () {
-        mineSweep.time+=1;
-    },1000)
+        mineSweep.time += 1;
+    }, 1000)
 
 </script>
 </body>
